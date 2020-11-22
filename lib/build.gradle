@@ -30,7 +30,7 @@ dependencies {
     implementation platform('com.google.protobuf:protobuf-bom:3.14.0')
     implementation platform('org.junit:junit-bom:5.7.0')
 
-    api 'org.apache.kafka:connect-api:2.6.0'
+    api 'org.apache.kafka:kafka-clients:2.6.0'
     api 'com.google.protobuf:protobuf-java'
 
     testImplementation 'org.junit.jupiter:junit-jupiter'

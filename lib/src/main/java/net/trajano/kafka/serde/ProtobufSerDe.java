@@ -8,7 +8,6 @@ import org.apache.kafka.common.serialization.Serializer;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,6 +44,37 @@ public class ProtobufSerDe<T extends Message> implements Serializer<T>, Deserial
     private boolean isKey;
     private boolean useTypeInfo;
 
+    private static Method parseFromMethodFromClassName(final String className) {
+        return parseFromMethodFromClass(classForName(className));
+    }
+
+    private static Class<?> classForName(final String className) {
+        try {
+            return Class.forName(className);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalArgumentException(String.format("class %s not found", className));
+        }
+
+    }
+
+    private static Method parseFromMethodFromClass(final Class<?> clazz) {
+
+        if (!Message.class.isAssignableFrom(clazz)) {
+            throw new IllegalArgumentException(String.format("%s is not assignable to %s", clazz, Message.class));
+        }
+        @SuppressWarnings("unchecked") final Class<? extends Message> messageClass = (Class<? extends Message>) clazz;
+        try {
+            final Method parseFrom = messageClass.getMethod("parseFrom", byte[].class);
+            if (!Modifier.isStatic(parseFrom.getModifiers())) {
+                throw new IllegalStateException(String.format("parseFrom method in %s is not static", messageClass));
+            }
+            return parseFrom;
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException(String.format("Missing expected parseFrom method in %s", messageClass), e);
+        }
+
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public T deserialize(final String topic, final byte[] data) {
@@ -53,7 +83,7 @@ public class ProtobufSerDe<T extends Message> implements Serializer<T>, Deserial
             throw new IllegalStateException("No default parseFrom method and type info is missing");
         }
         try {
-            return (T) defaultParseFromMethod.invoke(null, (Object) data);
+            return (T) defaultParseFromMethod.invoke(null, data);
         } catch (final ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
@@ -74,19 +104,18 @@ public class ProtobufSerDe<T extends Message> implements Serializer<T>, Deserial
             parseFromMethod = parseMethodFromHeaderIfAvailable(headers, VALUE_TYPE);
         }
         try {
-            return (T) parseFromMethod.invoke(null, (Object) data);
+            return (T) parseFromMethod.invoke(null, data);
         } catch (final ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
 
     }
 
-    private Method parseMethodFromHeaderIfAvailable(final Headers headers, final String valueType2) {
+    private Method parseMethodFromHeaderIfAvailable(final Headers headers, final String valueTypeHeaderName) {
         Method parseFromMethod;
-        final Iterator<Header> it = headers.headers(valueType2).iterator();
-        if (it.hasNext()) {
-            final Header firstKeyTypeHeader = it.next();
-            final String valueType = new String(firstKeyTypeHeader.value()).intern();
+        final Header valueTypeHeader = headers.lastHeader(valueTypeHeaderName);
+        if (valueTypeHeader != null) {
+            final String valueType = new String(valueTypeHeader.value()).intern();
             parseFromMethod = parseFromMethodMap.computeIfAbsent(valueType, ProtobufSerDe::parseFromMethodFromClassName);
         } else {
             parseFromMethod = defaultParseFromMethod;
@@ -125,37 +154,6 @@ public class ProtobufSerDe<T extends Message> implements Serializer<T>, Deserial
             if (configs.containsKey(VALUE_USE_TYPE_INFO)) {
                 useTypeInfo = Boolean.parseBoolean(String.valueOf(configs.get(VALUE_USE_TYPE_INFO)));
             }
-        }
-
-    }
-
-    private static Method parseFromMethodFromClassName(final String className) {
-        return parseFromMethodFromClass(classForName(className));
-    }
-
-    private static Class<?> classForName(final String className) {
-        try {
-            return Class.forName(className);
-        } catch (ClassNotFoundException e) {
-            throw new IllegalArgumentException(String.format("class %s not found", className));
-        }
-
-    }
-
-    private static Method parseFromMethodFromClass(final Class<?> clazz) {
-
-        if (!Message.class.isAssignableFrom(clazz)) {
-            throw new IllegalArgumentException(String.format("%s is not assignable to %s", clazz, Message.class));
-        }
-        @SuppressWarnings("unchecked") final Class<? extends Message> messageClass = (Class<? extends Message>) clazz;
-        try {
-            final Method parseFrom = messageClass.getMethod("parseFrom", byte[].class);
-            if (!Modifier.isStatic(parseFrom.getModifiers())) {
-                throw new IllegalStateException(String.format("parseFrom method in %s is not static", messageClass));
-            }
-            return parseFrom;
-        } catch (NoSuchMethodException e) {
-            throw new IllegalStateException(String.format("Missing expected parseFrom method in %s", messageClass), e);
         }
 
     }
